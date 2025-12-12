@@ -1,0 +1,5 @@
+venv/
+instance/
+instance/*
+finance.db
+__pycache__/
