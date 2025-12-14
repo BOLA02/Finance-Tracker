@@ -2,86 +2,150 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, date
 from database import db, init_db
-from models import Transaction
+from models import User, Transaction
 
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
-    
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+ app.instance_path.replace('\\','/') + '/finance.db'
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + app.instance_path.replace('\\', '/') + '/finance.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     init_db(app)
-
     db.init_app(app)
     CORS(app)
 
-    @app.route('/transactions', methods=['POST'])
-    def add_transaction():
+    with app.app_context():
+        db.create_all()
+
+
+    @app.route('/register', methods=['POST'])
+    def register():
         data = request.get_json() or {}
-        title = data.get('title')
-        amount = data.get('amount')
-        category = data.get('category')
-        ttype = data.get('type')
-        datestr = data.get('date')
+        email = data.get('email')
+        password = data.get('password')
 
-        if not title:
-            return jsonify({"error": "title is required"}), 400
-        if amount is None:
-            return jsonify({"error": "amount is required"}), 400
-        try:
-            amount = float(amount)
-        except (ValueError, TypeError):
-            return jsonify({"error": "amount must be a number"}), 400
-        if ttype not in ('income', 'expense'):
-            return jsonify({"error": "type must be 'income' or 'expense'"}), 400
+        if not email or not password:
+            return jsonify({"error": "email and password required"}), 400
 
-        if datestr:
-            try:
-                dt = datetime.strptime(datestr, '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({"error": "date must be in YYYY-MM-DD format"}), 400
-        else:
-            dt = date.today()
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "email already registered"}), 400
 
-        tx = Transaction(title=title, amount=amount, category=category or '', type=ttype, date=dt)
-        db.session.add(tx)
+        user = User(email=email)
+        user.set_password(password)
+        db.session.add(user)
         db.session.commit()
 
-        return jsonify({"message": "Transaction added", "transaction": tx.to_dict()}), 201
+        return jsonify({"message": "registration successful"}), 201
+
+    @app.route('/login', methods=['POST'])
+    def login():
+        data = request.get_json() or {}
+        email = data.get('email')
+        password = data.get('password')
+
+        user = User.query.filter_by(email=email).first()
+        if not user or not user.check_password(password):
+            return jsonify({"error": "invalid email or password"}), 401
+
+        return jsonify({"message": "login successful", "user_id": user.id}), 200
+
+    @app.route('/forgot-password', methods=['POST'])
+    def forgot_password():
+        data = request.get_json() or {}
+        email = data.get('email')
+        new_password = data.get('new_password')
+
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({"error": "email not registered"}), 404
+
+        user.set_password(new_password)
+        db.session.commit()
+        return jsonify({"message": "password updated"}), 200
+
+
+    def get_user():
+        user_id = request.headers.get('X-User-ID')
+        return User.query.get(user_id) if user_id else None
+
+    @app.route('/transactions', methods=['POST'])
+    def add_transaction():
+        user = get_user()
+        if not user:
+            return jsonify({"error": "unauthorized"}), 401
+
+        data = request.get_json()
+        dt = datetime.strptime(data.get('date'), '%Y-%m-%d').date() if data.get('date') else date.today()
+
+        tx = Transaction(
+            title=data['title'],
+            amount=float(data['amount']),
+            category=data.get('category', ''),
+            type=data['type'],
+            date=dt,
+            user_id=user.id
+        )
+
+        db.session.add(tx)
+        db.session.commit()
+        return jsonify(tx.to_dict()), 201
 
     @app.route('/transactions', methods=['GET'])
     def get_transactions():
-        transactions = Transaction.query.order_by(Transaction.id.desc()).all()
-        return jsonify({"transactions": [t.to_dict() for t in transactions]}), 200
+        user = get_user()
+        if not user:
+            return jsonify({"error": "unauthorized"}), 401
 
-    @app.route('/transactions/income', methods=['GET'])
-    def get_income():
-        transactions = Transaction.query.filter_by(type='income').order_by(Transaction.id.desc()).all()
-        return jsonify({"transactions": [t.to_dict() for t in transactions]}), 200
+        start = request.args.get('from')
+        end = request.args.get('to')
 
-    @app.route('/transactions/expense', methods=['GET'])
-    def get_expense():
-        transactions = Transaction.query.filter_by(type='expense').order_by(Transaction.id.desc()).all()
-        return jsonify({"transactions": [t.to_dict() for t in transactions]}), 200
+        query = Transaction.query.filter_by(user_id=user.id)
 
-    @app.route('/transactions/<int:tx_id>', methods=['GET'])
-    def get_transaction(tx_id):
-        tx = Transaction.query.get(tx_id)
+        if start and end:
+            query = query.filter(Transaction.date.between(start, end))
+
+        transactions = query.order_by(Transaction.id.desc()).all()
+        return jsonify([t.to_dict() for t in transactions]), 200
+
+    @app.route('/transactions/<int:tx_id>', methods=['PUT'])
+    def update_transaction(tx_id):
+        user = get_user()
+        if not user:
+            return jsonify({"error": "unauthorized"}), 401
+
+        tx = Transaction.query.filter_by(id=tx_id, user_id=user.id).first()
         if not tx:
-            return jsonify({"error": "Transaction not found"}), 404
+            return jsonify({"error": "transaction not found"}), 404
+
+        data = request.get_json()
+        tx.title = data.get('title', tx.title)
+        tx.amount = float(data.get('amount', tx.amount))
+        tx.category = data.get('category', tx.category)
+        tx.type = data.get('type', tx.type)
+
+        db.session.commit()
         return jsonify(tx.to_dict()), 200
 
-    @app.route('/transactions/<int:tx_id>', methods=['DELETE'])
-    def delete_transaction(tx_id):
-        tx = Transaction.query.get(tx_id)
-        if not tx:
-            return jsonify({"error": "Transaction not found"}), 404
-        db.session.delete(tx)
-        db.session.commit()
-        return jsonify({"message": "Transaction deleted"}), 200
+    @app.route('/summary/<int:year>/<int:month>', methods=['GET'])
+    def monthly_summary(year, month):
+        user = get_user()
+        if not user:
+            return jsonify({"error": "unauthorized"}), 401
+
+        transactions = Transaction.query.filter(
+            Transaction.user_id == user.id,
+            db.extract('year', Transaction.date) == year,
+            db.extract('month', Transaction.date) == month
+        ).all()
+
+        income = sum(t.amount for t in transactions if t.type == 'income')
+        expense = sum(t.amount for t in transactions if t.type == 'expense')
+
+        return jsonify({"income": income, "expense": expense}), 200
+    
 
     return app
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
