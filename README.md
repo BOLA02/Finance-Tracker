@@ -1,113 +1,187 @@
 Finance Tracker API (Backend)
+This is a backend REST API built with Flask for tracking personal finances.
 
-This is a simple backend API built with Flask.
-It lets you save, view, filter, and delete financial transactions.
-It uses SQLite as the database.
+It allows users to:
+Register and authenticate accounts
+Create and manage income/expense transactions
+Filter transactions by date
+View monthly financial summaries
 
-This project does not include a frontend.
-It is only for backend practice.
 
 Features
-The API can:
--Add a new transaction (POST)
--Get all transactions (GET)
--Get only income transactions (GET)
--Get only expense transactions (GET)
--Get a single transaction by ID (GET)
--Delete a transaction by ID (DELETE)
--Store everything in a SQLite database (instance/finance.db)
--Return all responses in JSON format
+The API supports:
+
+-User registration and login
+-Password reset (no email token)
+-User-based transactions (each transaction belongs to a user)
+-Add new transactions (income or expense)
+-Get all user transactions
+-Filter transactions by date range
+-Update a transaction
+-Monthly summary (income vs expense)
+-SQLite database storage
+-JSON-based API responses
 
 
 Project Structure
+
 finance-tracker/
-│── app.py               
-│── models.py            
-│── database.py          
-│── requirements.txt     
-│── README.md            
+│── app.py
+│── models.py
+│── database.py
+│── requirements.txt
+│── README.md
 │── instance/
-│    └── finance.db      
+│    └── finance.db
+
 
 
 Installation & Setup
-1. Create and activate a virtual environment 
+
+1.Create and activate a virtual environment
 
 python -m venv venv
 venv\Scripts\activate
 
-2. Install all the required packages
+
+2.Install dependencies
+
 pip install -r requirements.txt
 
-3. Run the backend
+
+3.Run the backend server
+
 python app.py
 
-The server will start at:
+
+The API will be available at:
 http://127.0.0.1:5000
 
-4. Create the database tables (only once)
-Open Python shell:
 
-python
-
-Then run:
-
-from app import create_app
-from database import db
-app = create_app()
-
-with app.app_context():
-    db.create_all()
-
-
-This will create the transactions table in instance/finance.db.
-
-NB: You do not need to do this again unless you delete your database.
+The database file (finance.db) is automatically created inside the instance folder.
 
 
 
-Testing the API (Postman)
-You can test your endpoints using Postman.
+Authentication Endpoints
 
-➤ Add a transaction (POST)
+➤ Register a user
 
-Method: POST
+POST `/register`
 
-URL:
+json
+{
+  "email": "test@example.com",
+  "password": "123456"
+}
 
-http://127.0.0.1:5000/transactions
 
 
-Body → raw → JSON:
+➤ Login
 
+POST `/login`
+
+json
+{
+  "email": "test@example.com",
+  "password": "123456"
+}
+
+
+Response includes:
+json
+{
+  "message": "login successful",
+  "user_id": 1
+}
+
+
+The returned `user_id` must be sent in request headers for protected endpoints(forgot password and transaction endpoints)
+
+Forgot password endpoint require this header
+
+```
+X-User-ID: <user_id>
+```
+
+
+➤ Forgot Password
+
+POST `/forgot-password`
+
+json
+{
+  "email": "test@example.com",
+  "new_password": "newpassword123"
+}
+
+
+
+Transactions
+All transaction endpoints require this header:
+
+```
+X-User-ID: <user_id>
+```
+
+---
+
+➤ Add a transaction
+
+POST `/transactions`
+
+json
 {
   "title": "Salary",
   "amount": 5000,
-  "category": "Income",
+  "category": "Job",
   "type": "income",
   "date": "2025-01-10"
 }
 
 
-➤ Get all transactions (GET)
-http://127.0.0.1:5000/transactions
+
+➤ Get all transactions
+
+GET `/transactions`
 
 
-➤ Get income transactions (GET)
-http://127.0.0.1:5000/transactions/income
+
+➤ Filter transactions by date
+
+GET`/transactions?from=2025-01-01&to=2025-01-31`
 
 
-➤ Get expense transactions (GET)
-http://127.0.0.1:5000/transactions/expense
+
+➤ Update a transaction
+
+PUT `/transactions/<transaction_id>`
+
+json
+{
+  "title": "Updated Salary",
+  "amount": 5500
+}
 
 
-➤ Get a transaction by ID (GET)
 
-Example:
-http://127.0.0.1:5000/transactions/1
+➤ Monthly summary (income vs expense)
+
+GET `/summary/<year>/<month>`
 
 
-➤ Delete a transaction (DELETE)
 
-Example:
-http://127.0.0.1:5000/transactions/1
+
+Testing with Postman
+
+-Ensure Postman is using the **Desktop Agent**
+-All requests should be sent to:
+
+```
+http://127.0.0.1:5000
+```
+
+-Set request body type to **raw → JSON**
+-Include `X-User-ID` header where required
+
+
+
